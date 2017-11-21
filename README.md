@@ -20,9 +20,12 @@ python lesson.py -p sport -t adaptive -d -v
 ```
 the above command reads the image under folder *sport* and draws a green rectangle around the bib in the image. 
   
-**environment**
+
+**Environment**
 
 Python 2.7
+
 OpenCV 3.3
+
 macOS Sierra 
 
