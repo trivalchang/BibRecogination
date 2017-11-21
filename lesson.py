@@ -11,6 +11,12 @@ from skimage import measure
 
 CONTOUR_WIDTH = 5
 
+bEnableDebug = False
+
+def debug_print(dbgStr):
+	if bEnableDebug == True:
+		print(dbgStr)
+
 class ImageReader():
 	imageList = []
 	bVideo = False
@@ -89,42 +95,59 @@ def find_toRemoveList(subList):
 
 	voteList = []
 	max_vote = None	
+	debug_print('===============================================')
 	for ((x, y, w, h), cnt) in subList:
 		area = cv2.contourArea(cnt)
 
 		if len(voteList) == 0:
-			voteList.append(((x, y, w, h), area, 1))
+			debug_print('new vote = {}'.format((x, y, w, h, x+w, 1)))
+			voteList.append(((x, y, w, h), x+w, 1))
 			max_vote = voteList[0]
 		else:
 			found_v = False
 			for v in voteList:
-				((vx, vy, vw, vh), v_area, v_vote) = v
-				if (w < vw-20) or (w > vw+20):
+				((vx, vy, vw, vh), v_right, v_vote) = v
+				if (w < vw-30) or (w > vw+30):
 					continue
 				if (h < vh-20) or (h > vh+20):
 					continue
-				voteList[voteList.index(v)] = ((vx, vy, vw, vh), v_area, v_vote+1)
+				if (y < (vy-30)) or (y > (vy+vh+30)) :
+					continue
+				# assume x is sorted in ascending order 
+				if (x > (v_right + 50)):
+					continue
+				debug_print('examine {}'.format((x, y, w, h)))
+				debug_print('		v_right = {} to {} '.format(v_right, x + w))
+				v_right = (x + w)
+				voteList[voteList.index(v)] = ((vx, vy, vw, vh), v_right, v_vote+1)
+				debug_print('add vote {} '.format((vx, vy, vw, vh, v_right, v_vote+1)))
 				(_, _, vote_cnt) = max_vote
 				if (vote_cnt < (v_vote+1)):
-					max_vote = ((vx, vy, vw, vh), v_area, v_vote+1)
+					max_vote = ((vx, vy, vw, vh), v_right, v_vote+1)
 				found_v = True
 				break
 			if (found_v == False):
-				voteList.append(((x, y, w, h), area, 1))
+				voteList.append(((x, y, w, h), x+w, 1))
+				debug_print('new vote = {}'.format((x, y, w, h, x+w, 1)))
 
 	toRemove = []
-	((vx, vy, vw, vh), v_area, v_vote) = max_vote
+	((vx, vy, vw, vh), v_right, v_vote) = max_vote
 	if (v_vote == 1):
 		return list(subList)
 
-	#print('------------')
+	debug_print('-------------')
+	debug_print('final vote = {}'.format((vx, vy, vw, vh, v_right, v_vote)))
 	for ((x, y, w, h), cnt) in subList:
-		if (w < vw-20) or (w > vw+20) or \
-						(h < vh-20) or (h > vh+20) :
+		if (w < vw-30) or (w > vw+30) or \
+						(h < vh-20) or (h > vh+20) or \
+						(x < vx) or \
+						(x > v_right) or \
+						(y < (vy-30)) or \
+						(y > (vy+vh+30)) :
 			toRemove.append(((x, y, w, h), cnt))
-			#print('removed', (x, y, w, h))
+			debug_print('removed {}'.format((x, y, w, h)))
 			continue
-		#print((x, y, w, h))	
+		debug_print((x, y, w, h))	
 
 	toRemove = sorted(toRemove, key=lambda b:b[0], reverse=False)
 	return toRemove
@@ -140,8 +163,7 @@ def filter_contours(img, contours, virtualize=True):
 	filteredBox = []
 	for c in contours:
 		area = cv2.contourArea(c)
-		if (area < 200):
-		#if (False):
+		if (area < 300):
 			continue
 		else:
 
@@ -149,8 +171,7 @@ def filter_contours(img, contours, virtualize=True):
 			rectArea = w*h
 			solidity = area/float(rectArea)
 			ar = float(w)/float(h)
-			#if (solidity > 0.3) and (ar > 0.4) and (ar < 0.9):
-			if (ar > 0.4) and (ar < 0.9):
+			if (ar > 0.2) and (ar < 0.9):
 				color = (0, 255, 0)
 				filtered.append(c)
 				filteredBox.append((x, y, w, h))
@@ -185,22 +206,30 @@ def filter_contours(img, contours, virtualize=True):
 		showResizeImg(clone, 'sorted by y position', 0, 0, 0)
 
 	filtered = []
-	#clone = img.copy()	
+	clone = img.copy()
+	finalCandidateList = []
 	for subList in candidateList:
+
 		toRemove = find_toRemoveList(subList)
 		subList = [item for item in subList if item not in toRemove]
+		if len(subList) > 1:
+			finalCandidateList.append(subList)
+		#print('===============')
 		if (virtualize == True):
+			color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 			for ((x, y, w, h), cnt) in subList:
-				cv2.drawContours(clone, [cnt], -1, (0, 255, 0), CONTOUR_WIDTH)
+				#print('{}'.format((x, y, w, h)))
+				cv2.drawContours(clone, [cnt], -1, (0, 255, ), -1)
 			for ((x, y, w, h), cnt) in toRemove:
-				cv2.drawContours(clone, [cnt], -1, (0, 0, 255), CONTOUR_WIDTH)
+				cv2.drawContours(clone, [cnt], -1, (0, 0, 255), 10)
 	if (virtualize == True):
 		showResizeImg(clone, 'red will be removed', 0, 0, 0)	
 
-	return candidateList
+	return finalCandidateList
 
 def draw_result(img, candidateList):
 	clone = img.copy()
+	debug_print('###################################')
 	for subList in candidateList:
 		if len(subList) == 1:
 			continue
@@ -214,7 +243,9 @@ def draw_result(img, candidateList):
 			y1 = max([(y+h), y1])
 			ar = float(x1-x0)/(y1-y0)
 		if ar > 1.2 and ar < 8:
+			print('********************')
 			for ((x, y, w, h), cnt) in subList:
+				debug_print('{}'.format((x, y, w, h)))
 				cv2.drawContours(clone, [cnt], -1, (0, 255, 0), CONTOUR_WIDTH)	
 				cv2.rectangle(clone, (x0, y0), (x1, y1), (255, 0, 0), CONTOUR_WIDTH)
 	showResizeImg(clone, 'Result : q to quit, p to repeat', 1, 0, 0)
@@ -260,11 +291,17 @@ def extract_blobs(img, visualize = False):
 
 
 def main():
+
+	global bEnableDebug
+
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-p", "--path", required=True, help="Path to the image")
 	ap.add_argument("-t", "--threshold", required=False, default='adaptive', help='threshold method')
 	ap.add_argument("-v", "--visualize", required=False, default=False, action='store_true', help='visualize the intermediate process')
+	ap.add_argument("-d", "--debug", required=False, default=False, action='store_true', help='output debug info')
 	args = vars(ap.parse_args())
+
+	bEnableDebug = args["debug"]
 
 	imgReader = ImageReader(args["path"])
 
