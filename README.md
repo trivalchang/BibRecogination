@@ -2,7 +2,7 @@
 
 This program aims to locate the bib of athletes by some basic image processing techniques. However, the result is poor.
 
-** Usage **
+**Usage**
 
 usage: lesson.py [-h] -p PATH [-t THRESHOLD] [-v] [-d]
 
@@ -14,13 +14,13 @@ optional arguments:
   -v, --visualize       visualize the intermediate process
   -d, --debug           output debug info
   
-** Example **
+**Example**
 ```
 python lesson.py -p sport -t adaptive -d -v
 ```
 the above command reads the image under folder *sport* and draws a green rectangle around the bib in the image. 
   
-** environment **
+**environment**
 Python 2.7
 OpenCV 3.3
 macOS Sierra 
