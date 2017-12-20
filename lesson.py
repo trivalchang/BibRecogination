@@ -8,6 +8,7 @@ import os
 import sys
 import random
 from skimage import measure
+from color_filter import threshold_by_color_filter
 
 CONTOUR_WIDTH = 5
 
@@ -37,6 +38,14 @@ class ImageReader():
 
 	def previous(self):
 		if self.index > 0 : self.index = self.index - 1
+
+def resizeImg(img, width=1280, height=720):
+	(h,w) = img.shape[:2]
+	r = min([float(width)/w, float(height)/h])
+	(w, h) = (int(r * w), int(r * h))
+
+	img = cv2.resize(img, (w, h))
+	return img
 
 def showResizeImg(img, name, waitMS, x, y, width=1280, height=720):
 	(h,w) = img.shape[:2]
@@ -88,7 +97,41 @@ def morphological_process(img, method, kernelSize):
 		return dilated
 	return img.copy()
 
-def find_toRemoveList(subList):
+def minWindth(w):
+	return (w/3) 
+
+def maxWindth(w):
+	return (w*1.75) 
+
+def minHeight(h):
+	return (h*0.75)
+
+def maxHeight(h):
+	return (h*1.5)
+
+def filterUnwanted(candidate, filterCord):
+	global bEnableDebug
+
+	(x, y, w, h) = candidate
+	(vx, vy, vw, vh, v_right, v_bottom) = filterCord
+				
+	if (w < minWindth(vw)) or (w > maxWindth(vw)):
+		debug_print('w is not compatible: w={}, vw = {}'.format(w, vw))
+		return True
+	if (h < minHeight(vh)) or (h > maxHeight(vh)):
+		debug_print('h is not compatible: h={}, vh = {}'.format(h, vh))
+		return True
+	if (y < vy) or (y > v_bottom):
+		debug_print('y is not compatible: y={}, vy = {}, vh = {}, '.format(y, vy, vh))
+		return True
+	# assume x is sorted in ascending order 
+	if (x > v_right):
+		debug_print('x is not compatible: x={}, v_right = {}, vw = {}, '.format(x, v_right, vw))
+		return True
+
+	return False	
+
+def find_toRemoveList(img, subList):
 
 	if len(subList) == 1:
 		return list(subList)
@@ -96,54 +139,46 @@ def find_toRemoveList(subList):
 	voteList = []
 	max_vote = None	
 	debug_print('===============================================')
+	color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 	for ((x, y, w, h), cnt) in subList:
 		area = cv2.contourArea(cnt)
 
 		if len(voteList) == 0:
-			debug_print('new vote = {}'.format((x, y, w, h, x+w, 1)))
-			voteList.append(((x, y, w, h), x+w, 1))
+			debug_print('new vote = {}'.format((x, y, w, h, x+w, y+h, 1)))
+			voteList.append(((x, y, w, h), x+w, y+h, 1))
 			max_vote = voteList[0]
 		else:
 			found_v = False
 			for v in voteList:
-				((vx, vy, vw, vh), v_right, v_vote) = v
-				if (w < vw-30) or (w > vw+30):
+				((vx, vy, vw, vh), v_right, v_bottom, v_vote) = v
+				if filterUnwanted((x, y, w, h), (vx, vy-vh*0.5, vw, vh, v_right + vw, v_bottom+vh/2)) == True:
 					continue
-				if (h < vh-20) or (h > vh+20):
-					continue
-				if (y < (vy-30)) or (y > (vy+vh+30)) :
-					continue
-				# assume x is sorted in ascending order 
-				if (x > (v_right + 50)):
-					continue
+
 				debug_print('examine {}'.format((x, y, w, h)))
 				debug_print('		v_right = {} to {} '.format(v_right, x + w))
 				v_right = (x + w)
-				voteList[voteList.index(v)] = ((vx, vy, vw, vh), v_right, v_vote+1)
-				debug_print('add vote {} '.format((vx, vy, vw, vh, v_right, v_vote+1)))
-				(_, _, vote_cnt) = max_vote
+				vy = min(y, vy)
+				v_bottom = min(y+h, v_bottom)
+				voteList[voteList.index(v)] = ((vx, vy, vw, vh), v_right, v_bottom, v_vote+1)
+				debug_print('add vote {} '.format((vx, vy, vw, vh, v_right, v_bottom, v_vote+1)))
+				(_, _, _, vote_cnt) = max_vote
 				if (vote_cnt < (v_vote+1)):
-					max_vote = ((vx, vy, vw, vh), v_right, v_vote+1)
+					max_vote = ((vx, vy, vw, vh), v_right, v_bottom, v_vote+1)
 				found_v = True
 				break
 			if (found_v == False):
-				voteList.append(((x, y, w, h), x+w, 1))
-				debug_print('new vote = {}'.format((x, y, w, h, x+w, 1)))
+				voteList.append(((x, y, w, h), x+w, y+h, 1))
+				debug_print('new vote = {}'.format((x, y, w, h, x+w, y+h, 1)))
 
 	toRemove = []
-	((vx, vy, vw, vh), v_right, v_vote) = max_vote
+	((vx, vy, vw, vh), v_right, v_bottom, v_vote) = max_vote
 	if (v_vote == 1):
 		return list(subList)
 
 	debug_print('-------------')
-	debug_print('final vote = {}'.format((vx, vy, vw, vh, v_right, v_vote)))
+	debug_print('final vote = {}'.format((vx, vy, vw, vh, v_right, v_bottom, v_vote)))
 	for ((x, y, w, h), cnt) in subList:
-		if (w < vw-30) or (w > vw+30) or \
-						(h < vh-20) or (h > vh+20) or \
-						(x < vx) or \
-						(x > v_right) or \
-						(y < (vy-30)) or \
-						(y > (vy+vh+30)) :
+		if filterUnwanted((x, y, w, h), (vx, vy, vw, vh, v_right, v_bottom)) == True:			
 			toRemove.append(((x, y, w, h), cnt))
 			debug_print('removed {}'.format((x, y, w, h)))
 			continue
@@ -163,7 +198,7 @@ def filter_contours(img, contours, virtualize=True):
 	filteredBox = []
 	for c in contours:
 		area = cv2.contourArea(c)
-		if (area < 300):
+		if (area < 50):
 			continue
 		else:
 
@@ -186,9 +221,10 @@ def filter_contours(img, contours, virtualize=True):
 								key=lambda b:b[1][1], reverse=False))
 	candidateList = []
 	subList = []
+	clone = img.copy()
 	(lastX, lastY, lastW, lastH) = (0, 0, 0, 0)
 	for ((x, y, w, h), cnt) in zip(filteredBox, filtered):
-		if (y > (lastY+20)) or (y < (lastY-20)):
+		if (y > (lastY+lastH/2)) or (y < (lastY-lastH/2)):
 			if len(subList) > 0:
 				subList = sorted(subList, key=lambda a:a[0], reverse=False)
 				candidateList.append(list(subList))
@@ -196,12 +232,15 @@ def filter_contours(img, contours, virtualize=True):
 		subList.append(((x, y, w, h), cnt))
 		(lastX, lastY, lastW, lastH) = (x, y, w, h)
 
+	if (len(subList) > 0):
+		subList = sorted(subList, key=lambda a:a[0], reverse=False)
+		candidateList.append(list(subList))
+
+	clone = img.copy()
 	if (virtualize == True):
 		for subList in candidateList:
-			#print('**********')
 			color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 			for ((x, y, w, h), cnt) in subList:
-				#print((x, y, w, h))
 				cv2.drawContours(clone, [cnt], -1, color, CONTOUR_WIDTH)
 		showResizeImg(clone, 'sorted by y position', 0, 0, 0)
 
@@ -209,13 +248,13 @@ def filter_contours(img, contours, virtualize=True):
 	clone = img.copy()
 	finalCandidateList = []
 	for subList in candidateList:
-
-		toRemove = find_toRemoveList(subList)
+		toRemove = find_toRemoveList(clone, subList)
 		subList = [item for item in subList if item not in toRemove]
 		if len(subList) > 1:
 			finalCandidateList.append(subList)
 		#print('===============')
-		if (virtualize == True):
+		#if (virtualize == True):
+		if (False):
 			color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 			for ((x, y, w, h), cnt) in subList:
 				#print('{}'.format((x, y, w, h)))
@@ -243,7 +282,7 @@ def draw_result(img, candidateList):
 			y1 = max([(y+h), y1])
 			ar = float(x1-x0)/(y1-y0)
 		if ar > 1.2 and ar < 8:
-			print('********************')
+			debug_print('********************')
 			for ((x, y, w, h), cnt) in subList:
 				debug_print('{}'.format((x, y, w, h)))
 				cv2.drawContours(clone, [cnt], -1, (0, 255, 0), CONTOUR_WIDTH)	
@@ -296,6 +335,7 @@ def main():
 
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-p", "--path", required=True, help="Path to the image")
+	ap.add_argument("-r", "--resize", required=False, default=False, action='store_true', help="Path to the image")
 	ap.add_argument("-t", "--threshold", required=False, default='adaptive', help='threshold method')
 	ap.add_argument("-v", "--visualize", required=False, default=False, action='store_true', help='visualize the intermediate process')
 	ap.add_argument("-d", "--debug", required=False, default=False, action='store_true', help='output debug info')
@@ -310,6 +350,10 @@ def main():
 		ret, img, imgName = imgReader.read()
 		if (ret == False):
 			break
+
+		if (args["resize"] == True):
+			img = resizeImg(img)
+
 		(h,w,_) = img.shape
 
 		key = showResizeImg(img, imgName, 0, 0, 0)
@@ -319,25 +363,48 @@ def main():
 			imgReader.previous()
 			continue
 
-		gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+		if args['threshold'] != 'color':
+			gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 		
-		# blur the image to remove noise
-		blur = blur_img(gray, 'bilateral')
+			# blur the image to remove noise
+			blur = blur_img(gray, 'bilateral')
 
-		# equalize the image to have better contrast
-		blur = cv2.equalizeHist(blur)
+			# equalize the image to have better contrast
+			blur = cv2.equalizeHist(blur)
 
-		# threshold image to binary
-		thresholded = threshold_img(blur, args['threshold'])
+			# threshold image to binary
+			thresholded = threshold_img(blur, args['threshold'])
+			# do some morphological operation to remove noise and have better shape
+			thresholded = morphological_process(thresholded, 'closing', (1,1))
 
-		# do some morphological operation to remove noise and have better shape
-		morphologied = morphological_process(thresholded, 'closing', (1,1))
-		
-		# extract_blobs is really slow
-		#morphologied = extract_blobs(morphologied)
-		
+		else:
+			mask = threshold_by_color_filter(imgName, img)
+
+			if args["resize"] == True:
+				ksize = (1, 1)
+			else:
+				ksize = (3, 3)
+			mask = morphological_process(mask, 'closing', ksize)
+			
+			gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+			adaptive = threshold_img(gray, 'adaptive')
+
+			if args["resize"] == True:
+				ksize = (5, 5)
+			else:
+				ksize = (13, 13)
+
+			adaptive = morphological_process(adaptive, 'closing', ksize)
+			thresholded = cv2.bitwise_and(adaptive, adaptive, mask=mask)
+			
+			if (args['visualize'] == True):
+				showResizeImg(mask, 'mask', 0, 900, 0)
+				showResizeImg(thresholded, 'adaptive thresholded', 0, 900, 0)
+				showResizeImg(thresholded, 'bitwise_and', 0, 900, 0)
+
 		# find contours
-		contour = cv2.findContours(morphologied, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+		contour = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 		contour = contour[1]
 
 		# filter out some contours based on the prior knowledge about bib
