@@ -13,6 +13,8 @@ from color_filter import threshold_by_color_filter
 CONTOUR_WIDTH = 5
 
 bEnableDebug = False
+imageH = 0
+imageW = 0
 
 def debug_print(dbgStr):
 	if bEnableDebug == True:
@@ -109,6 +111,12 @@ def minHeight(h):
 def maxHeight(h):
 	return (h*1.5)
 
+def minArea():
+	global imageW, imageH
+	a = imageW * imageH
+	a = a / (100*100)
+	return a
+
 def filterUnwanted(candidate, filterCord):
 	global bEnableDebug
 
@@ -198,7 +206,7 @@ def filter_contours(img, contours, virtualize=True):
 	filteredBox = []
 	for c in contours:
 		area = cv2.contourArea(c)
-		if (area < 50):
+		if (area < minArea()):
 			continue
 		else:
 
@@ -332,6 +340,7 @@ def extract_blobs(img, visualize = False):
 def main():
 
 	global bEnableDebug
+	global imageW, imageH
 
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-p", "--path", required=True, help="Path to the image")
@@ -354,7 +363,7 @@ def main():
 		if (args["resize"] == True):
 			img = resizeImg(img)
 
-		(h,w,_) = img.shape
+		(imageH, imageW,_) = img.shape
 
 		key = showResizeImg(img, imgName, 0, 0, 0)
 		if key == ord('q'):
