@@ -91,6 +91,10 @@ def morphological_process(img, method, kernelSize):
 		kernel = cv2.getStructuringElement(cv2.MORPH_RECT, kernelSize)
 		closing = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
 		return closing
+	elif (method == 'blackhat'):
+		kernel = cv2.getStructuringElement(cv2.MORPH_RECT, kernelSize)
+		blackhat = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, kernel)
+		return blackhat
 	elif (method == 'erode'):
 		eroded = cv2.erode(img, None, iterations=1)
 		return eroded
@@ -259,16 +263,18 @@ def filter_contours(img, contours, virtualize=True):
 		toRemove = find_toRemoveList(clone, subList)
 		subList = [item for item in subList if item not in toRemove]
 		if len(subList) > 1:
-			finalCandidateList.append(subList)
-		#print('===============')
-		#if (virtualize == True):
-		if (False):
-			color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+			x1 = 0
+			y1 = 0
+			y0, x0 = img.shape[:2]
 			for ((x, y, w, h), cnt) in subList:
-				#print('{}'.format((x, y, w, h)))
-				cv2.drawContours(clone, [cnt], -1, (0, 255, ), -1)
-			for ((x, y, w, h), cnt) in toRemove:
-				cv2.drawContours(clone, [cnt], -1, (0, 0, 255), 10)
+				x0 = min([x, x0])
+				y0 = min([y, y0])
+				x1 = max([(x+w), x1])
+				y1 = max([(y+h), y1])
+			ar = float(x1-x0)/(y1-y0)
+			if ar > 1.2 and ar < 8:
+				finalCandidateList.append(((x0, y0, x1, y1), subList))
+
 	if (virtualize == True):
 		showResizeImg(clone, 'red will be removed', 0, 0, 0)	
 
@@ -277,24 +283,21 @@ def filter_contours(img, contours, virtualize=True):
 def draw_result(img, candidateList):
 	clone = img.copy()
 	debug_print('###################################')
-	for subList in candidateList:
-		if len(subList) == 1:
-			continue
-		x1 = 0
-		y1 = 0
-		y0, x0 = img.shape[:2]
+	idx = 0
+	startY = 0
+	for ((x0, y0, x1, y1), subList) in candidateList:
+		print('********************')
 		for ((x, y, w, h), cnt) in subList:
-			x0 = min([x, x0])
-			y0 = min([y, y0])
-			x1 = max([(x+w), x1])
-			y1 = max([(y+h), y1])
-			ar = float(x1-x0)/(y1-y0)
-		if ar > 1.2 and ar < 8:
-			debug_print('********************')
-			for ((x, y, w, h), cnt) in subList:
-				debug_print('{}'.format((x, y, w, h)))
-				cv2.drawContours(clone, [cnt], -1, (0, 255, 0), CONTOUR_WIDTH)	
-				cv2.rectangle(clone, (x0, y0), (x1, y1), (255, 0, 0), CONTOUR_WIDTH)
+			print('{}'.format((x, y, w, h)))
+			cv2.drawContours(clone, [cnt], -1, (0, 255, 0), CONTOUR_WIDTH)	
+			
+		cv2.rectangle(clone, (x0, y0), (x1, y1), (255, 0, 0), CONTOUR_WIDTH)
+		bib = img[y0:y1, x0:x1]
+		showResizeImg(bib, 'BIB{}'.format(idx), 1, 800, startY, x1-x0, y1-y0)
+
+		idx = idx + 1
+		startY = startY + y1 - y0 + 50
+
 	showResizeImg(clone, 'Result : q to quit, p to repeat', 1, 0, 0)
 
 def extract_blobs(img, visualize = False):
@@ -365,12 +368,13 @@ def main():
 
 		(imageH, imageW,_) = img.shape
 
-		key = showResizeImg(img, imgName, 0, 0, 0)
-		if key == ord('q'):
-			break
-		if (key == ord('p')):
-			imgReader.previous()
-			continue
+		if (args['visualize'] == True):
+			key = showResizeImg(img, imgName, 0, 0, 0)
+			if key == ord('q'):
+				break
+			if (key == ord('p')):
+				imgReader.previous()
+				continue
 
 		if args['threshold'] != 'color':
 			gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
