@@ -281,10 +281,19 @@ def filter_contours(img, contours, virtualize=True):
 	return finalCandidateList
 
 def draw_result(img, candidateList):
-	clone = img.copy()
+
 	debug_print('###################################')
-	idx = 0
-	startY = 0
+
+
+	clone = img.copy()
+	(imageH,imaheW) = img.shape[:2]
+
+	h_gap = 10
+	v_gap = 10
+	startY = 0	
+
+	maxW = np.amax([x1-x0 for ((x0, y0, x1, y1), _) in candidateList])
+	resultImg = np.zeros((imageH,imaheW+maxW+h_gap*2, 3), dtype=np.uint8)
 	for ((x0, y0, x1, y1), subList) in candidateList:
 		print('********************')
 		for ((x, y, w, h), cnt) in subList:
@@ -292,13 +301,12 @@ def draw_result(img, candidateList):
 			cv2.drawContours(clone, [cnt], -1, (0, 255, 0), CONTOUR_WIDTH)	
 			
 		cv2.rectangle(clone, (x0, y0), (x1, y1), (255, 0, 0), CONTOUR_WIDTH)
-		bib = img[y0:y1, x0:x1]
-		showResizeImg(bib, 'BIB{}'.format(idx), 1, 800, startY, x1-x0, y1-y0)
+		resultImg[startY:startY+y1-y0, imaheW+h_gap:imaheW+h_gap+x1-x0] = img[y0:y1, x0:x1]
+		startY = startY + y1 - y0 + v_gap
 
-		idx = idx + 1
-		startY = startY + y1 - y0 + 50
-
-	showResizeImg(clone, 'Result : q to quit, p to repeat', 1, 0, 0)
+	#resultImg = np.zeros(img.shape, dtype=np.uint8)
+	resultImg[0:imageH, 0:imageW] = clone
+	showResizeImg(resultImg, 'Result : q to quit, p to repeat', 1, 0, 0)
 
 def extract_blobs(img, visualize = False):
 	labels = measure.label(img, neighbors=8, background=0)
