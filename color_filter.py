@@ -20,6 +20,7 @@ def threshold_by_color_filter(imgPath, img):
 	upperColor = upperColor.translate(None, '[],').split()
 	upperColor = [int(v) for v in upperColor]
 
+
 	#print('color = {}, {}'.format(lowerColor[0], upperColor[0]))
 	f.close()	
 

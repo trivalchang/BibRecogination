@@ -99,7 +99,7 @@ def morphological_process(img, method, kernelSize):
 		eroded = cv2.erode(img, None, iterations=1)
 		return eroded
 	elif (method == 'dilate'):
-		dilated = cv2.dilate(eroded, None, iterations=1)
+		dilated = cv2.dilate(img, None, iterations=1)
 		return dilated
 	return img.copy()
 
@@ -107,7 +107,7 @@ def minWindth(w):
 	return (w/3) 
 
 def maxWindth(w):
-	return (w*1.75) 
+	return (w*3) 
 
 def minHeight(h):
 	return (h*0.75)
@@ -118,7 +118,7 @@ def maxHeight(h):
 def minArea():
 	global imageW, imageH
 	a = imageW * imageH
-	a = a / (100*100)
+	a = a / (200*200)
 	return a
 
 def filterUnwanted(candidate, filterCord):
@@ -136,14 +136,17 @@ def filterUnwanted(candidate, filterCord):
 	if (y < vy) or (y > v_bottom):
 		debug_print('y is not compatible: y={}, vy = {}, vh = {}, '.format(y, vy, vh))
 		return True
-	# assume x is sorted in ascending order 
 	if (x > v_right):
 		debug_print('x is not compatible: x={}, v_right = {}, vw = {}, '.format(x, v_right, vw))
 		return True
+	if (x < vx):
+		debug_print('x is not compatible: x={}, vx = {} '.format(x, vx))
+		return True
+
 
 	return False	
 
-def find_toRemoveList(img, subList):
+def find_toRemoveList(img, subList, virtualize=True):
 
 	if len(subList) == 1:
 		return list(subList)
@@ -151,9 +154,14 @@ def find_toRemoveList(img, subList):
 	voteList = []
 	max_vote = None	
 	debug_print('===============================================')
+	clone = img.copy()
 	color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 	for ((x, y, w, h), cnt) in subList:
 		area = cv2.contourArea(cnt)
+
+		if (virtualize == True):
+			cv2.drawContours(clone, [cnt], -1, (0, 0, 255), CONTOUR_WIDTH)
+			showResizeImg(clone, '{}'.format((x, y, w, h)), 0, 0, 0)
 
 		if len(voteList) == 0:
 			debug_print('new vote = {}'.format((x, y, w, h, x+w, y+h, 1)))
@@ -208,20 +216,26 @@ def filter_contours(img, contours, virtualize=True):
 
 	filtered = []
 	filteredBox = []
+	possibleCandidate = []
 	for c in contours:
+		clone = img.copy()
 		area = cv2.contourArea(c)
+		(x, y, w, h) = cv2.boundingRect(c)
+		rectArea = w*h
+		solidity = area/float(rectArea)
+		ar = float(w)/float(h)
+		#cv2.drawContours(clone, [c], -1, (255, 0, 0), CONTOUR_WIDTH)
+		#showResizeImg(clone, 'area={}, ar={}'.format(area, ar), 0, 0, 0)
 		if (area < minArea()):
 			continue
 		else:
 
-			(x, y, w, h) = cv2.boundingRect(c)
-			rectArea = w*h
-			solidity = area/float(rectArea)
-			ar = float(w)/float(h)
-			if (ar > 0.2) and (ar < 0.9):
+			if (ar > 0.2) and (ar < 3):
 				color = (0, 255, 0)
 				filtered.append(c)
 				filteredBox.append((x, y, w, h))
+			elif (ar > 0.2) and (ar < 3):
+				possibleCandidate.append(((x, y, w, h), c))
 			else:
 				color = (0, 0, 255)
 
@@ -260,7 +274,7 @@ def filter_contours(img, contours, virtualize=True):
 	clone = img.copy()
 	finalCandidateList = []
 	for subList in candidateList:
-		toRemove = find_toRemoveList(clone, subList)
+		toRemove = find_toRemoveList(clone, subList, virtualize=False)
 		subList = [item for item in subList if item not in toRemove]
 		if len(subList) > 1:
 			x1 = 0
@@ -272,18 +286,21 @@ def filter_contours(img, contours, virtualize=True):
 				x1 = max([(x+w), x1])
 				y1 = max([(y+h), y1])
 			ar = float(x1-x0)/(y1-y0)
-			if ar > 1.2 and ar < 8:
+			if ar > 1 and ar < 8:
 				finalCandidateList.append(((x0, y0, x1, y1), subList))
 
 	if (virtualize == True):
 		showResizeImg(clone, 'red will be removed', 0, 0, 0)	
 
-	return finalCandidateList
+	return (finalCandidateList, possibleCandidate)
 
-def draw_result(img, candidateList):
+def draw_result(img, imgName, candidateList, possibleCandidate):
 
 	debug_print('###################################')
 
+	if len(candidateList) == 0 and len(possibleCandidate) == 0:
+		showResizeImg(img, imgName, 1, 0, 0)
+		return
 
 	clone = img.copy()
 	(imageH,imaheW) = img.shape[:2]
@@ -292,7 +309,10 @@ def draw_result(img, candidateList):
 	v_gap = 10
 	startY = 0	
 
-	maxW = np.amax([x1-x0 for ((x0, y0, x1, y1), _) in candidateList])
+	maxW = 0
+	if len(candidateList) != 0:
+		maxW = np.amax([x1-x0 for ((x0, y0, x1, y1), _) in candidateList])
+
 	resultImg = np.zeros((imageH,imaheW+maxW+h_gap*2, 3), dtype=np.uint8)
 	for ((x0, y0, x1, y1), subList) in candidateList:
 		print('********************')
@@ -304,48 +324,12 @@ def draw_result(img, candidateList):
 		resultImg[startY:startY+y1-y0, imaheW+h_gap:imaheW+h_gap+x1-x0] = img[y0:y1, x0:x1]
 		startY = startY + y1 - y0 + v_gap
 
+	for ((x, y, w, h), c) in possibleCandidate:
+		cv2.drawContours(clone, [c], -1, (0, 255, 0), CONTOUR_WIDTH)	
+
 	#resultImg = np.zeros(img.shape, dtype=np.uint8)
 	resultImg[0:imageH, 0:imageW] = clone
-	showResizeImg(resultImg, 'Result : q to quit, p to repeat', 1, 0, 0)
-
-def extract_blobs(img, visualize = False):
-	labels = measure.label(img, neighbors=8, background=0)
-	mask = np.zeros(img.shape, dtype="uint8")
-	print("[INFO] found {} blobs".format(len(np.unique(labels))))
-
-	cnt = 0
-	waitMS = 40
-	# loop over the unique components
-	for (i, label) in enumerate(np.unique(labels)):
-		# if this is the background label, ignore it
-		if label == 0:
-			#print("[INFO] label: 0 (background)")
-			continue
- 
-		# otherwise, construct the label mask to display only connected components for
-		# the current label
-		#print("[INFO] label: {} (foreground)".format(i))
-		labelMask = np.zeros(img.shape, dtype="uint8")
-		labelMask[labels == label] = 255
-		numPixels = cv2.countNonZero(labelMask)
- 
-		# if the number of pixels in the component is sufficiently large, add it to our
-		# mask of "large" blobs
-		if numPixels > 200 and numPixels < 3000:
-			mask = cv2.add(mask, labelMask)
-			cnt = cnt + 1
-			if (visualize == True):
-				key = showResizeImg(mask, 'masking', waitMS, 0, 0)
-				if key == ord('s'):
-					waitMS = 500
-				if key == ord('q'):
-					waitMS = 100
-
-	print('total blobs = {}'.format(cnt))
-	if (visualize == True):
-		img = cv2.bitwise_and(img, img, mask=mask)
-		showResizeImg(img, 'extracted', 0, 0, 0)
-	return img
+	showResizeImg(resultImg, imgName, 1, 0, 0)
 
 
 def main():
@@ -418,10 +402,9 @@ def main():
 
 			adaptive = morphological_process(adaptive, 'closing', ksize)
 			thresholded = cv2.bitwise_and(adaptive, adaptive, mask=mask)
-			
 			if (args['visualize'] == True):
 				showResizeImg(mask, 'mask', 0, 900, 0)
-				showResizeImg(thresholded, 'adaptive thresholded', 0, 900, 0)
+				showResizeImg(adaptive, 'adaptive thresholded', 0, 900, 0)
 				showResizeImg(thresholded, 'bitwise_and', 0, 900, 0)
 
 		# find contours
@@ -429,12 +412,12 @@ def main():
 		contour = contour[1]
 
 		# filter out some contours based on the prior knowledge about bib
-		candidateList = filter_contours(img, contour, args['visualize'])
+		(candidateList, possibleCandidate) = filter_contours(img, contour, args['visualize'])
 
 		# clear all intermediate images
 		cv2.destroyAllWindows()
 
-		draw_result(img, candidateList)
+		draw_result(img, imgName, candidateList, possibleCandidate)
 		
 		key = cv2.waitKey(0)
 		if key == ord('q'):
