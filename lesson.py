@@ -7,8 +7,12 @@ from scipy import signal
 import os 
 import sys
 import random
+
 from skimage import measure
 from color_filter import threshold_by_color_filter
+from utility import ocr
+from utility import basics
+from utility.image_processing.four_point_transform import four_point_transform
 
 CONTOUR_WIDTH = 5
 
@@ -40,68 +44,6 @@ class ImageReader():
 
 	def previous(self):
 		if self.index > 0 : self.index = self.index - 1
-
-def resizeImg(img, width=1280, height=720):
-	(h,w) = img.shape[:2]
-	r = min([float(width)/w, float(height)/h])
-	(w, h) = (int(r * w), int(r * h))
-
-	img = cv2.resize(img, (w, h))
-	return img
-
-def showResizeImg(img, name, waitMS, x, y, width=1280, height=720):
-	(h,w) = img.shape[:2]
-	r = min([float(width)/w, float(height)/h])
-	(w, h) = (int(r * w), int(r * h))
-
-	img = cv2.resize(img, (w, h))
-	cv2.imshow(name, img)
-	cv2.moveWindow(name, x, y)
-	key = cv2.waitKey(waitMS)
-
-	return key & 0xFF
-
-
-def blur_img(img, method):
-	if (method == 'bilateral'):
-		diameter = 9
-		sigmaColor = 21
-		sigmaSpace = 7
-		blur = cv2.bilateralFilter(img, diameter, sigmaColor, sigmaSpace)
-	else:
-		blur = img.copy()
-	return blur
-
-def threshold_img(img, method):
-	if (method == 'adaptive'):
-		thresholded = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 25, 15)
-	elif (method == 'OTSU'):
-		T, thresholded = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-	else:
-		if (method != None):
-			try:
-				T = int(method)
-			except:
-				T = 128
-		T, thresholded = cv2.threshold(img, T, 255, cv2.THRESH_BINARY_INV)
-	return thresholded
-
-def morphological_process(img, method, kernelSize):
-	if (method == 'closing'):
-		kernel = cv2.getStructuringElement(cv2.MORPH_RECT, kernelSize)
-		closing = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
-		return closing
-	elif (method == 'blackhat'):
-		kernel = cv2.getStructuringElement(cv2.MORPH_RECT, kernelSize)
-		blackhat = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, kernel)
-		return blackhat
-	elif (method == 'erode'):
-		eroded = cv2.erode(img, None, iterations=1)
-		return eroded
-	elif (method == 'dilate'):
-		dilated = cv2.dilate(img, None, iterations=1)
-		return dilated
-	return img.copy()
 
 def minWindth(w):
 	return (w/3) 
@@ -212,7 +154,7 @@ def filter_contours(img, contours, virtualize=True):
 	clone = img.copy()
 	if (virtualize == True):
 		cv2.drawContours(clone, contours, -1, (0, 0, 0), CONTOUR_WIDTH)
-		showResizeImg(clone, 'original contour', 0, 0, 0)
+		basics.showResizeImg(clone, 'original contour', 0, 0, 0)
 
 	filtered = []
 	filteredBox = []
@@ -225,7 +167,7 @@ def filter_contours(img, contours, virtualize=True):
 		solidity = area/float(rectArea)
 		ar = float(w)/float(h)
 		#cv2.drawContours(clone, [c], -1, (255, 0, 0), CONTOUR_WIDTH)
-		#showResizeImg(clone, 'area={}, ar={}'.format(area, ar), 0, 0, 0)
+		#basics.showResizeImg(clone, 'area={}, ar={}'.format(area, ar), 0, 0, 0)
 		if (area < minArea()):
 			continue
 		else:
@@ -241,7 +183,7 @@ def filter_contours(img, contours, virtualize=True):
 
 	if (virtualize == True):
 		cv2.drawContours(clone, filtered, -1, (255, 0, 0), CONTOUR_WIDTH)
-		showResizeImg(clone, 'remove unlikely: keep blue', 0, 0, 0)
+		basics.showResizeImg(clone, 'remove unlikely: keep blue', 0, 0, 0)
 
 	(filtered, filteredBox) = zip(*sorted(zip(filtered, filteredBox),
 								key=lambda b:b[1][1], reverse=False))
@@ -268,7 +210,7 @@ def filter_contours(img, contours, virtualize=True):
 			color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 			for ((x, y, w, h), cnt) in subList:
 				cv2.drawContours(clone, [cnt], -1, color, CONTOUR_WIDTH)
-		showResizeImg(clone, 'sorted by y position', 0, 0, 0)
+		basics.showResizeImg(clone, 'sorted by y position', 0, 0, 0)
 
 	filtered = []
 	clone = img.copy()
@@ -290,16 +232,16 @@ def filter_contours(img, contours, virtualize=True):
 				finalCandidateList.append(((x0, y0, x1, y1), subList))
 
 	if (virtualize == True):
-		showResizeImg(clone, 'red will be removed', 0, 0, 0)	
+		basics.showResizeImg(clone, 'red will be removed', 0, 0, 0)	
 
 	return (finalCandidateList, possibleCandidate)
 
-def draw_result(img, imgName, candidateList, possibleCandidate):
+def draw_result(img, imgName, bibList):
 
 	debug_print('###################################')
 
-	if len(candidateList) == 0 and len(possibleCandidate) == 0:
-		showResizeImg(img, imgName, 1, 0, 0)
+	if len(bibList) == 0:
+		basics.showResizeImg(img, imgName, 1, 0, 0)
 		return
 
 	clone = img.copy()
@@ -310,27 +252,50 @@ def draw_result(img, imgName, candidateList, possibleCandidate):
 	startY = 0	
 
 	maxW = 0
-	if len(candidateList) != 0:
-		maxW = np.amax([x1-x0 for ((x0, y0, x1, y1), _) in candidateList])
+	if len(bibList) != 0:
+		maxW = np.amax([x1-x0 for ((x0, y0, x1, y1), _) in bibList])
 
 	resultImg = np.zeros((imageH,imaheW+maxW+h_gap*2, 3), dtype=np.uint8)
-	for ((x0, y0, x1, y1), subList) in candidateList:
+	candidateImg = []
+	candidateBoundingBox = []
+	for ((x0, y0, x1, y1), text) in bibList:
 		print('********************')
-		for ((x, y, w, h), cnt) in subList:
-			print('{}'.format((x, y, w, h)))
-			cv2.drawContours(clone, [cnt], -1, (0, 255, 0), CONTOUR_WIDTH)	
-			
+
+		cv2.putText(clone, text, (x0,y0-30), cv2.FONT_HERSHEY_SIMPLEX, 2,(255,255,0),5,cv2.LINE_AA)			
 		cv2.rectangle(clone, (x0, y0), (x1, y1), (255, 0, 0), CONTOUR_WIDTH)
 		resultImg[startY:startY+y1-y0, imaheW+h_gap:imaheW+h_gap+x1-x0] = img[y0:y1, x0:x1]
 		startY = startY + y1 - y0 + v_gap
 
-	for ((x, y, w, h), c) in possibleCandidate:
-		cv2.drawContours(clone, [c], -1, (0, 255, 0), CONTOUR_WIDTH)	
-
-	#resultImg = np.zeros(img.shape, dtype=np.uint8)
 	resultImg[0:imageH, 0:imageW] = clone
-	showResizeImg(resultImg, imgName, 1, 0, 0)
+	basics.showResizeImg(resultImg, imgName, 1, 0, 0)
+	return (candidateImg, candidateBoundingBox)
 
+def recognizeBibNumber(img, imgName, candidateList):
+
+	if len(candidateList) == 0:
+		return
+
+	BibList = []
+	for ((x0, y0, x1, y1), subList) in candidateList:
+		candidateImg = img[y0:y1, x0:x1]
+		contour = cv2.findContours(candidateImg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[1]
+		text = ''
+		boundingBoxes = [cv2.boundingRect(c) for c in contour]
+		(contour, boundingBoxes) = zip(*sorted(zip(contour, boundingBoxes), key=lambda b:b[1][0]))
+		for (c, (x, y, w, h)) in zip(contour, boundingBoxes):
+			if (w*h) < 50:
+				continue
+
+			cropImg = candidateImg[y:y+h, x:x+w]
+			c0 = cv2.findContours(cropImg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[1][0]
+			if (len(c0) == 0):
+				continue
+			rect = cv2.minAreaRect(c0)
+			box = np.int0(cv2.boxPoints(rect))
+			newImg = four_point_transform(cropImg, box)
+			text = text + ocr.ocr(newImg, method='bbp')
+		BibList.append(((x0, y0, x1, y1), text))
+	return BibList
 
 def main():
 
@@ -348,6 +313,7 @@ def main():
 	bEnableDebug = args["debug"]
 
 	imgReader = ImageReader(args["path"])
+	candidateCnt = 0
 
 	while True:
 		cv2.destroyAllWindows()
@@ -356,12 +322,12 @@ def main():
 			break
 
 		if (args["resize"] == True):
-			img = resizeImg(img)
+			img = basics.resizeImg(img)
 
 		(imageH, imageW,_) = img.shape
 
 		if (args['visualize'] == True):
-			key = showResizeImg(img, imgName, 0, 0, 0)
+			key = basics.showResizeImg(img, imgName, 0, 0, 0)
 			if key == ord('q'):
 				break
 			if (key == ord('p')):
@@ -372,15 +338,15 @@ def main():
 			gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 		
 			# blur the image to remove noise
-			blur = blur_img(gray, 'bilateral')
+			blur = basics.blur_img(gray, 'bilateral')
 
 			# equalize the image to have better contrast
 			blur = cv2.equalizeHist(blur)
 
 			# threshold image to binary
-			thresholded = threshold_img(blur, args['threshold'])
+			thresholded = basics.threshold_img(blur, args['threshold'])
 			# do some morphological operation to remove noise and have better shape
-			thresholded = morphological_process(thresholded, 'closing', (1,1))
+			thresholded = basics.morphological_process(thresholded, 'closing', (1,1))
 
 		else:
 			mask = threshold_by_color_filter(imgName, img)
@@ -389,23 +355,23 @@ def main():
 				ksize = (1, 1)
 			else:
 				ksize = (3, 3)
-			mask = morphological_process(mask, 'closing', ksize)
+			mask = basics.morphological_process(mask, 'closing', ksize)
 			
 			gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-			adaptive = threshold_img(gray, 'adaptive')
+			adaptive = basics.threshold_img(gray, 'adaptive')
 
 			if args["resize"] == True:
 				ksize = (5, 5)
 			else:
 				ksize = (13, 13)
 
-			adaptive = morphological_process(adaptive, 'closing', ksize)
+			adaptive = basics.morphological_process(adaptive, 'closing', ksize)
 			thresholded = cv2.bitwise_and(adaptive, adaptive, mask=mask)
 			if (args['visualize'] == True):
-				showResizeImg(mask, 'mask', 0, 900, 0)
-				showResizeImg(adaptive, 'adaptive thresholded', 0, 900, 0)
-				showResizeImg(thresholded, 'bitwise_and', 0, 900, 0)
+				basics.showResizeImg(mask, 'mask', 0, 900, 0)
+				basics.showResizeImg(adaptive, 'adaptive thresholded', 0, 900, 0)
+				basics.showResizeImg(thresholded, 'bitwise_and', 0, 900, 0)
 
 		# find contours
 		contour = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -417,8 +383,10 @@ def main():
 		# clear all intermediate images
 		cv2.destroyAllWindows()
 
-		draw_result(img, imgName, candidateList, possibleCandidate)
-		
+		BibList = recognizeBibNumber(thresholded, imgName, candidateList)
+		draw_result(img, imgName, BibList)
+
+
 		key = cv2.waitKey(0)
 		if key == ord('q'):
 			break
