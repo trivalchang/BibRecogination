@@ -8,6 +8,8 @@ import os
 import sys
 import random
 
+sys.path.insert(0, '/Users/developer/guru/')
+
 from skimage import measure
 from color_filter import threshold_by_color_filter
 from utility import ocr
